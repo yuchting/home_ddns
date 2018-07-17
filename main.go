@@ -19,6 +19,13 @@ type DomainData struct {
 	ID     string
 }
 
+type RecordData struct {
+	Host     string
+	DomainID string
+	RecordID string
+	HostID   string
+}
+
 func findDomain(domains []DomainData, do string) (dd *DomainData) {
 	fmt.Printf("finding %s in your domain list\n", do)
 	dotIdx := strings.Index(do, ".")
@@ -90,9 +97,8 @@ func setCloudXNSHeader(request *http.Request, config config.HomeDDNSConfig) {
 	request.Header.Add("API-HMAC", md5str)
 }
 
-func getCloudXNSDomainList(cfg config.HomeDDNSConfig) (domains []DomainData, err error) {
-	const CloudXNSDomainListURL string = "https://www.cloudxns.net/api2/domain"
-	request, err := http.NewRequest("GET", CloudXNSDomainListURL, nil)
+func getRequestJson(url string, cfg config.HomeDDNSConfig) (jsonContent map[string]interface{}, err error) {
+	request, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -106,10 +112,23 @@ func getCloudXNSDomainList(cfg config.HomeDDNSConfig) (domains []DomainData, err
 	if err != nil {
 		return nil, err
 	}
-
 	defer response.Body.Close()
+	content, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		return nil, err
+	}
 
-	// it show be return:
+	jsonData := make(map[string]interface{})
+	if err = json.Unmarshal([]byte(content), &jsonData); err != nil {
+		return nil, err
+	}
+
+	return jsonData, nil
+}
+
+// https://www.cloudxns.net/Support/detail/id/1361.html
+func getCloudXNSDomainList(cfg config.HomeDDNSConfig) (domains []DomainData, err error) {
+
 	//{
 	//   "code":1,
 	//   "message":"success",
@@ -128,13 +147,10 @@ func getCloudXNSDomainList(cfg config.HomeDDNSConfig) (domains []DomainData, err
 	//   ]
 	//}
 
-	content, err := ioutil.ReadAll(response.Body)
+	jsonData, err := getRequestJson("https://www.cloudxns.net/api2/domain", cfg)
 	if err != nil {
 		return nil, err
 	}
-
-	jsonData := make(map[string]interface{})
-	json.Unmarshal([]byte(content), &jsonData)
 
 	if data, exist := jsonData["data"]; exist {
 		if dataVal, ok := data.([]interface{}); ok {
@@ -148,12 +164,85 @@ func getCloudXNSDomainList(cfg config.HomeDDNSConfig) (domains []DomainData, err
 					domains = append(domains, d)
 				}
 			}
-		} else {
-			fmt.Printf("'data' is not exist, \n %s\n", content)
 		}
 	}
 
 	return domains, nil
+}
+
+// https://www.cloudxns.net/Support/detail/id/1361.html
+func getDomainRecords(cfg config.HomeDDNSConfig, domain DomainData) (records []RecordData, err error) {
+
+	// {
+	// 	"code": 1,
+	// 	"message": "success",
+	// 	"total": "2",
+	// 	"offset": "0",
+	// 	"row_num": "10",
+	// 	"data": [{
+	// 			"record_id": "31295",
+	// 			"host_id": "12618",
+	// 			"host": "1",
+	// 			"line_zh": "\u5168\u7f51\u9ed8\u8ba4",
+	// 			"line_en": "DEFAULT",
+	// 			"line_id”:1,
+	// 			"mx": null,
+	// 			"value": "2.2.2.3",
+	// 			"type": ”A”,
+	// 			"status": "userstop",
+	// 			"create_time": "2015-01-01 08:00:00",
+	// 			"update_time": "2015-03-01 08:00:00"
+	// 		},
+	// 		{
+	// 			"record_id": "31355",
+	// 			"host_id": "12618",
+	// 			"host": "1",
+	// 			"line_zh": "\u5168\u7f51\u9ed8\u8ba4",
+	// 			"line_en": "DEFAULT",
+	// 			"line_id”:1,
+	// 			"mx": null,
+	// 			"value": "2.2.2.2",
+	// 			"type": ”A”,
+	// 			"status": "ok",
+	// 			"create_time": "2015-01-01 08:00:00",
+	// 			"update_time": "2015-03-01 08:00:00"
+	// 		}
+	// 	]
+	// }
+
+	url := fmt.Sprintf("https://www.cloudxns.net/api2/record/%s?host_id=0&offset=0&row_num=2000", domain.ID)
+	jsonData, err := getRequestJson(url, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	if data, exist := jsonData["data"]; exist {
+		if dataVal, ok := data.([]interface{}); ok {
+			records = make([]RecordData, 0, 5)
+			for _, v := range dataVal {
+				if record, ok := v.(map[string]interface{}); ok {
+					d := RecordData{}
+					d.Host, _ = record["host"].(string)
+					d.RecordID, _ = record["record_id"].(string)
+					d.HostID, _ = record["host_id"].(string)
+					d.DomainID = domain.ID
+
+					records = append(records, d)
+				}
+			}
+		}
+	}
+
+	return records, nil
+}
+
+// https://www.cloudxns.net/Support/detail/id/1361.html
+func updateDomainAAA(cfg config.HomeDDNSConfig, record RecordData, ip string) {
+	//url := "https://www.cloudxns.net/api2/record/" + record.RecordID
+}
+
+func addDomainAAA(cfg config.HomeDDNSConfig) {
+
 }
 
 func main() {
@@ -182,4 +271,25 @@ func main() {
 		os.Exit(-1)
 	}
 
+	records, err := getDomainRecords(config, *domainData)
+	if err != nil {
+		fmt.Println("error to get records ", err)
+		os.Exit(-1)
+	}
+
+	host_name := config.DDNS_Domain[0:strings.Index(config.DDNS_Domain, ".")]
+	found_host := false
+	for _, v := range records {
+		if host_name == v.Host {
+			found_host = true
+			fmt.Printf("update host record")
+
+			updateDomainAAA(config, v, ip)
+		}
+	}
+
+	if !found_host {
+		fmt.Printf("add host record")
+
+	}
 }

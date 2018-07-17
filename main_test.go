@@ -15,23 +15,23 @@ func TestGetOwnIp(t *testing.T) {
 	fmt.Printf("own ip is : %+v \n", ip)
 }
 
-func getList(t *testing.T) (dd []DomainData) {
-	config := config.HomeDDNSConfig{}
-	err := config.Read("./config.json")
+func getList(t *testing.T) (dd []DomainData, cfg config.HomeDDNSConfig) {
+	cfg = config.HomeDDNSConfig{}
+	err := cfg.Read("./config.json")
 	if err != nil {
 		t.Error(err)
 	}
 
-	dd, err = getCloudXNSDomainList(config)
+	dd, err = getCloudXNSDomainList(cfg)
 	if err != nil {
 		t.Error(err)
 	}
 
-	return
+	return dd, cfg
 }
 
 func TestGetCloudXNSDomainList(t *testing.T) {
-	domains := getList(t)
+	domains, _ := getList(t)
 	fmt.Printf("domains : %+v \n", domains)
 }
 
@@ -56,5 +56,22 @@ func TestFindDomains(t *testing.T) {
 
 	if findDomain(domains, "test.test.test.aaa.com") != nil {
 		t.Error(fmt.Errorf("test error"))
+	}
+}
+
+func TestGetDomainRecords(t *testing.T) {
+	domains, cfg := getList(t)
+	for _, v := range domains {
+		records, err := getDomainRecords(cfg, v)
+		if err != nil {
+			t.Error(err)
+			break
+		}
+
+		fmt.Printf("get %s records:\n", v.Domain)
+
+		for _, re := range records {
+			fmt.Println(re.Host)
+		}
 	}
 }

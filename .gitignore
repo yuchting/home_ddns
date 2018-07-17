@@ -1,4 +1,4 @@
 /config/config.json
 /config.json
-/debug
-/debug.test
+debug
+debug.test
