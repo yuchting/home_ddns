@@ -7,11 +7,45 @@ import (
 	"home_ddns/config"
 	"io/ioutil"
 	"net/http"
+	"os"
 	"regexp"
+	"strings"
 	"time"
 )
 
-func getOwnIP() (ip string) {
+// DomainData
+type DomainData struct {
+	Domain string
+	ID     string
+}
+
+func findDomain(domains []DomainData, do string) (dd *DomainData) {
+	fmt.Printf("finding %s in your domain list\n", do)
+	dotIdx := strings.Index(do, ".")
+
+	if dotIdx == -1 {
+		fmt.Printf("%s is not domain!\n", do)
+		return nil
+	}
+
+	do = do[(dotIdx + 1):]
+
+	if !regexp.MustCompile(`^[\w\d]+\.[\w\d]+$`).Match([]byte(do)) {
+		fmt.Printf("%s is not domain!\n", do)
+		return nil
+	}
+
+	for _, v := range domains {
+		if strings.HasSuffix(v.Domain, do) {
+			return &v
+		}
+	}
+
+	fmt.Printf("%s cannot be found in you own domains\n", do)
+	return nil
+}
+
+func getOwnIP() (ip string, err error) {
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 	}
@@ -19,23 +53,20 @@ func getOwnIP() (ip string) {
 	const GetOwnIPWebsite string = "http://ip.cn"
 	request, err := http.NewRequest("GET", GetOwnIPWebsite, nil)
 	if err != nil {
-		fmt.Println("request "+GetOwnIPWebsite+" failed!\n ", err)
-		return
+		return "", err
 	}
 
 	request.Header.Add("User-Agent", "curl/7.29.0")
 
 	response, err := client.Do(request)
 	if err != nil {
-		fmt.Println("request "+GetOwnIPWebsite+" failed!\n ", err)
-		return
+		return "", err
 	}
 
 	defer response.Body.Close()
 	body, err := ioutil.ReadAll(response.Body)
 	if err != nil {
-		fmt.Println("read body error !\n ", err)
-		return
+		return "", err
 	}
 
 	reg := regexp.MustCompile(`(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})`)
@@ -43,11 +74,10 @@ func getOwnIP() (ip string) {
 	content := (string)(body)
 	ownIP := reg.FindStringSubmatch(content)
 	if ownIP == nil || len(ownIP) == 0 {
-		fmt.Printf("cannot parse the ip address from the website body:\n" + content)
-		return
+		return "", fmt.Errorf("cannot parse the ip address from the website body:\n" + content)
 	}
 
-	return ownIP[0]
+	return ownIP[0], nil
 }
 
 func setCloudXNSHeader(request *http.Request, config config.HomeDDNSConfig) {
@@ -60,7 +90,7 @@ func setCloudXNSHeader(request *http.Request, config config.HomeDDNSConfig) {
 	request.Header.Add("API-HMAC", md5str)
 }
 
-func getCloudXNSDomainList(cfg config.HomeDDNSConfig) (domains []string, err error) {
+func getCloudXNSDomainList(cfg config.HomeDDNSConfig) (domains []DomainData, err error) {
 	const CloudXNSDomainListURL string = "https://www.cloudxns.net/api2/domain"
 	request, err := http.NewRequest("GET", CloudXNSDomainListURL, nil)
 	if err != nil {
@@ -107,16 +137,15 @@ func getCloudXNSDomainList(cfg config.HomeDDNSConfig) (domains []string, err err
 	json.Unmarshal([]byte(content), &jsonData)
 
 	if data, exist := jsonData["data"]; exist {
-		if dataVal, ok := data.([]map[string]interface{}); ok {
-			for i, v := range dataVal {
-				if _, exist := v["domain"]; exist {
-					if domain, ok := v["domain"].(string); ok {
-						domains[i] = domain
-					} else {
-						fmt.Printf("this 'domain' is not string\n %s\n", content)
-					}
-				} else {
-					fmt.Printf("'domain' is not exist, \n %s\n", content)
+		if dataVal, ok := data.([]interface{}); ok {
+			domains = make([]DomainData, 0, 5)
+			for _, v := range dataVal {
+				if domainData, ok := v.(map[string]interface{}); ok {
+					d := DomainData{}
+					d.Domain, _ = domainData["domain"].(string)
+					d.ID, _ = domainData["id"].(string)
+
+					domains = append(domains, d)
 				}
 			}
 		} else {
@@ -130,10 +159,27 @@ func getCloudXNSDomainList(cfg config.HomeDDNSConfig) (domains []string, err err
 func main() {
 	config := config.HomeDDNSConfig{}
 	if err := config.Read("config.json"); err != nil {
-		fmt.Println("error read config file, please create a config file.")
-		return
+		fmt.Println("error read config file, please create a json config file.")
+		os.Exit(-1)
 	}
 
-	ip := getOwnIP()
+	ip, err := getOwnIP()
+	if err != nil {
+		fmt.Println("error to get own IP ", err)
+		os.Exit(-1)
+	}
+
 	fmt.Println("Got own IP: ", ip)
+
+	domains, err := getCloudXNSDomainList(config)
+	if err != nil {
+		fmt.Println("error to get domain list ", err)
+	}
+	fmt.Println("Got own domains: ", domains)
+
+	domainData := findDomain(domains, config.DDNS_Domain)
+	if domainData == nil {
+		os.Exit(-1)
+	}
+
 }
