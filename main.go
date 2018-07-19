@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/md5"
 	"encoding/json"
 	"fmt"
@@ -13,7 +14,6 @@ import (
 	"time"
 )
 
-// DomainData
 type DomainData struct {
 	Domain string
 	ID     string
@@ -43,7 +43,7 @@ func findDomain(domains []DomainData, do string) (dd *DomainData) {
 	}
 
 	for _, v := range domains {
-		if strings.HasSuffix(v.Domain, do) {
+		if strings.HasSuffix(v.Domain, do+".") {
 			return &v
 		}
 	}
@@ -87,9 +87,15 @@ func getOwnIP() (ip string, err error) {
 	return ownIP[0], nil
 }
 
-func setCloudXNSHeader(request *http.Request, config config.HomeDDNSConfig) {
+func setCloudXNSHeader(request *http.Request, config config.HomeDDNSConfig, paramsBody []byte) {
 	dateStr := time.Now().Format(time.RFC1123Z)
-	hashStr := config.CloudXNS_API_Key + request.URL.String() + dateStr + config.CloudXNS_API_Secret
+
+	hashStr := config.CloudXNS_API_Key + request.URL.String()
+	if paramsBody != nil {
+		hashStr += string(paramsBody)
+	}
+	hashStr += dateStr + config.CloudXNS_API_Secret
+
 	md5str := fmt.Sprintf("%x", md5.Sum([]byte(hashStr)))
 
 	request.Header.Add("API-KEY", config.CloudXNS_API_Key)
@@ -102,7 +108,7 @@ func getRequestJson(url string, cfg config.HomeDDNSConfig) (jsonContent map[stri
 	if err != nil {
 		return nil, err
 	}
-	setCloudXNSHeader(request, cfg)
+	setCloudXNSHeader(request, cfg, nil)
 
 	client := &http.Client{
 		Timeout: 5 * time.Second,
@@ -236,9 +242,77 @@ func getDomainRecords(cfg config.HomeDDNSConfig, domain DomainData) (records []R
 	return records, nil
 }
 
+func getPostPutJson(postOrPut bool, url string, params map[string]string, cfg config.HomeDDNSConfig) (map[string]interface{}, error) {
+
+	jsonByte, err := json.Marshal(params)
+	if err != nil {
+		return nil, err
+	}
+
+	method := "POST"
+	if !postOrPut {
+		method = "PUT"
+	}
+
+	request, err := http.NewRequest(method, url, bytes.NewBuffer(jsonByte))
+	if err != nil {
+		return nil, err
+	}
+
+	setCloudXNSHeader(request, cfg, jsonByte)
+
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	content, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	jsonData := make(map[string]interface{})
+	if err = json.Unmarshal([]byte(content), &jsonData); err != nil {
+		return nil, err
+	}
+
+	return jsonData, nil
+}
+
 // https://www.cloudxns.net/Support/detail/id/1361.html
-func updateDomainAAA(cfg config.HomeDDNSConfig, record RecordData, ip string) {
-	//url := "https://www.cloudxns.net/api2/record/" + record.RecordID
+func updateDomainAAA(cfg config.HomeDDNSConfig, record RecordData, ip string) error {
+	params := map[string]string{
+		"domain_id": record.DomainID,
+		"host":      record.Host,
+		"value":     ip,
+		"ttl":       "600",
+		"type":      "A",
+	}
+
+	jsonData, err := getPostPutJson(false, "https://www.cloudxns.net/api2/record/"+record.RecordID, params, cfg)
+	if err != nil {
+		return err
+	}
+
+	// {
+	// 	"code":1,
+	// 	"message":" success",
+	// 	"data":{
+	// 		"id":63389,
+	// 		"domain_name":"x.1s45test.com.",
+	// 		"value":"9.2.4.3"
+	// 	}
+	// }
+
+	if message, exist := jsonData["message"]; !exist || message != "success" {
+		return fmt.Errorf("error response : %+v", jsonData)
+	}
+
+	return nil
 }
 
 func addDomainAAA(cfg config.HomeDDNSConfig) {
@@ -277,19 +351,22 @@ func main() {
 		os.Exit(-1)
 	}
 
-	host_name := config.DDNS_Domain[0:strings.Index(config.DDNS_Domain, ".")]
-	found_host := false
+	hostName := config.DDNS_Domain[0:strings.Index(config.DDNS_Domain, ".")]
+	foundHost := false
 	for _, v := range records {
-		if host_name == v.Host {
-			found_host = true
-			fmt.Printf("update host record")
+		if hostName == v.Host {
+			foundHost = true
+			fmt.Printf("update exist host '%s.%s' record as '%s'...\n", v.Host, domainData.Domain, ip)
 
-			updateDomainAAA(config, v, ip)
+			if err = updateDomainAAA(config, v, ip); err != nil {
+				fmt.Println("error : ", err)
+			}
+
+			break
 		}
 	}
 
-	if !found_host {
-		fmt.Printf("add host record")
-
+	if !foundHost {
+		fmt.Printf("add host record '%s'...\n", config.DDNS_Domain)
 	}
 }
