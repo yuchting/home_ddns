@@ -242,7 +242,7 @@ func getDomainRecords(cfg config.HomeDDNSConfig, domain DomainData) (records []R
 	return records, nil
 }
 
-func getPostPutJson(postOrPut bool, url string, params map[string]string, cfg config.HomeDDNSConfig) (map[string]interface{}, error) {
+func getPostPutJson(postOrPut bool, url string, params map[string]interface{}, cfg config.HomeDDNSConfig) (map[string]interface{}, error) {
 
 	jsonByte, err := json.Marshal(params)
 	if err != nil {
@@ -285,7 +285,7 @@ func getPostPutJson(postOrPut bool, url string, params map[string]string, cfg co
 
 // https://www.cloudxns.net/Support/detail/id/1361.html
 func updateDomainAAA(cfg config.HomeDDNSConfig, record RecordData, ip string) error {
-	params := map[string]string{
+	params := map[string]interface{}{
 		"domain_id": record.DomainID,
 		"host":      record.Host,
 		"value":     ip,
@@ -315,8 +315,37 @@ func updateDomainAAA(cfg config.HomeDDNSConfig, record RecordData, ip string) er
 	return nil
 }
 
-func addDomainAAA(cfg config.HomeDDNSConfig) {
+func addDomainAAA(cfg config.HomeDDNSConfig, domainData DomainData, host string, ip string) error {
+	// id, err := strconv.Atoi(domainData.ID)
+	// if err != nil {
+	// 	return fmt.Errorf("domain id is not integer %+v", err)
+	// }
 
+	params := map[string]interface{}{
+		"domain_id": domainData.ID,
+		"host":      host,
+		"value":     ip,
+		"line_id":   "1",
+		"ttl":       "600",
+		"type":      "A",
+	}
+
+	jsonData, err := getPostPutJson(true, "https://www.cloudxns.net/api2/record", params, cfg)
+	if err != nil {
+		return err
+	}
+
+	// {
+	// 	"code":1,
+	// 	"message":"success",
+	// 	"record_id":[1234]
+	// }
+
+	if message, exist := jsonData["message"]; !exist || message != "success" {
+		return fmt.Errorf("error response : %+v", jsonData)
+	}
+
+	return nil
 }
 
 func main() {
@@ -356,10 +385,12 @@ func main() {
 	for _, v := range records {
 		if hostName == v.Host {
 			foundHost = true
-			fmt.Printf("update exist host '%s.%s' record as '%s'...\n", v.Host, domainData.Domain, ip)
+			fmt.Printf("update exist host '%s.%s' A record as '%s'...\n", v.Host, domainData.Domain, ip)
 
 			if err = updateDomainAAA(config, v, ip); err != nil {
 				fmt.Println("error : ", err)
+			} else {
+				fmt.Println("Successfull!")
 			}
 
 			break
@@ -368,5 +399,11 @@ func main() {
 
 	if !foundHost {
 		fmt.Printf("add host record '%s'...\n", config.DDNS_Domain)
+
+		if err = addDomainAAA(config, *domainData, hostName, ip); err != nil {
+			fmt.Println("error : ", err)
+		} else {
+			fmt.Println("Successfull!")
+		}
 	}
 }
