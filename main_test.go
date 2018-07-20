@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"home_ddns/config"
 	"testing"
 )
 
@@ -15,19 +14,22 @@ func TestGetOwnIp(t *testing.T) {
 	fmt.Printf("own ip is : %+v \n", ip)
 }
 
-func getList(t *testing.T) (dd []DomainData, cfg config.HomeDDNSConfig) {
-	cfg = config.HomeDDNSConfig{}
-	err := cfg.Read("./config.json")
+func getList(t *testing.T) (dd []DomainData, api CloudXNSAPI) {
+	api = CloudXNSAPI{
+		Config: HomeDDNSConfig{},
+	}
+
+	err := api.Config.Read("./config.json")
 	if err != nil {
 		t.Error(err)
 	}
 
-	dd, err = getCloudXNSDomainList(cfg)
+	dd, err = api.getCloudXNSDomainList()
 	if err != nil {
 		t.Error(err)
 	}
 
-	return dd, cfg
+	return dd, api
 }
 
 func TestGetCloudXNSDomainList(t *testing.T) {
@@ -60,9 +62,9 @@ func TestFindDomains(t *testing.T) {
 }
 
 func TestGetDomainRecords(t *testing.T) {
-	domains, cfg := getList(t)
+	domains, api := getList(t)
 	for _, v := range domains {
-		records, err := getDomainRecords(cfg, v)
+		records, err := api.getDomainRecords(v)
 		if err != nil {
 			t.Error(err)
 			break

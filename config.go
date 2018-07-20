@@ -1,4 +1,4 @@
-package config
+package main
 
 import (
 	"encoding/json"
@@ -6,7 +6,7 @@ import (
 	"regexp"
 )
 
-// Config for CloudXNS settings
+// HomeDDNSConfig Config for CloudXNS settings
 type HomeDDNSConfig struct {
 	CloudXNS_API_Key    string
 	CloudXNS_API_Secret string
