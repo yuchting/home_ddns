@@ -15,6 +15,19 @@ type CloudXNSAPI struct {
 	Config HomeDDNSConfig
 }
 
+type DomainData struct {
+	Domain string
+	ID     string
+}
+
+type RecordData struct {
+	Host     string
+	DomainID string
+	RecordID string
+	HostID   string
+	Value    string
+}
+
 func (api CloudXNSAPI) setCloudXNSHeader(request *http.Request, paramsBody []byte) {
 	dateStr := time.Now().Format(time.RFC1123Z)
 
@@ -160,6 +173,7 @@ func (api CloudXNSAPI) getDomainRecords(domain DomainData) (records []RecordData
 					d.RecordID, _ = record["record_id"].(string)
 					d.HostID, _ = record["host_id"].(string)
 					d.DomainID = domain.ID
+					d.Value, _ = record["value"].(string)
 
 					records = append(records, d)
 				}

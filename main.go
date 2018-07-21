@@ -10,18 +10,6 @@ import (
 	"time"
 )
 
-type DomainData struct {
-	Domain string
-	ID     string
-}
-
-type RecordData struct {
-	Host     string
-	DomainID string
-	RecordID string
-	HostID   string
-}
-
 func findDomain(domains []DomainData, do string) (dd *DomainData) {
 	fmt.Printf("finding %s in your domain list\n", do)
 	dotIdx := strings.Index(do, ".")
@@ -167,12 +155,17 @@ or
 	for _, v := range records {
 		if hostName == v.Host {
 			foundHost = true
-			fmt.Printf("update exist host '%s.%s' A record as '%s'...\n", v.Host, domainData.Domain, ip)
 
-			if err = api.updateDomainAAA(v, ip); err != nil {
-				fmt.Println("error : ", err)
+			if ip != v.Value {
+				fmt.Printf("update exist host '%s.%s' A record as '%s'...\n", v.Host, domainData.Domain, ip)
+
+				if err = api.updateDomainAAA(v, ip); err != nil {
+					fmt.Println("error : ", err)
+				} else {
+					fmt.Println("Successfull!")
+				}
 			} else {
-				fmt.Println("Successfull!")
+				fmt.Println("same IP value in record, don't need set again.")
 			}
 
 			break
