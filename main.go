@@ -1,10 +1,12 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 	"time"
@@ -71,58 +73,64 @@ func getOwnIP() (ip string, err error) {
 	return ownIP[0], nil
 }
 
+func ipDiff(cfg HomeDDNSConfig, ip string) {
+	if cfg.IP_Path != "" {
+
+		ipdata, err := ioutil.ReadFile(cfg.IP_Path)
+		if err != nil && !os.IsNotExist(err) {
+			fmt.Printf("read ip '%s'file error!\n %+v", cfg.IP_Path, err)
+			return
+		}
+
+		formerIP := string(ipdata)
+
+		if formerIP != ip {
+			fmt.Printf("current ip <%s> is different from former<%s>, ", ip, formerIP)
+			if cfg.IP_Diff_Shell != "" {
+				fmt.Printf("execute '%s'\n", cfg.IP_Diff_Shell)
+				cmd := exec.Command(cfg.IP_Diff_Shell)
+				out, err := cmd.Output()
+				if err != nil {
+					fmt.Println(err)
+				}
+				fmt.Println(string(out))
+			}
+
+			ioutil.WriteFile(cfg.IP_Path, []byte(ip), 0666)
+		}
+	}
+}
+
 func main() {
+	var jsonPath string
+	var config = HomeDDNSConfig{}
 
-	const helpNote string = `
--c <json format config file>
-or
---key <api key of CloudXNS> 
-    you can apply from https://www.cloudxns.net
---secret <api secret of CloudXNS> 
-    you can apply from https://www.cloudxns.net
---domain <domain name>
-    'homeddns.example.com' or 'ddns.mydomain.com'
-	`
+	flag.StringVar(&jsonPath, "c", "", "json format config file")
+	flag.StringVar(&config.CloudXNS_API_Key, "key", "", "[api key of CloudXNS], you can apply from https://www.cloudxns.net")
+	flag.StringVar(&config.CloudXNS_API_Secret, "secret", "", "[api secret of CloudXNS], you can apply from https://www.cloudxns.net")
+	flag.StringVar(&config.DDNS_Domain, "domain", "", "[domain name], write current ip address to a file")
+	flag.StringVar(&config.IP_Path, "ip", "", "[filepath], write current ip address to a file")
+	flag.StringVar(&config.IP_Diff_Shell, "ip-diff-sh", "", "[sh filepath/command], if the ip address is different with former ip which was writen into file, this shell/command will be called")
 
-	var key string
-	var secret string
-	var domain string
-	var configFile string
+	flag.Parse()
 
-	args := os.Args[1:]
-	for i, v := range args {
-		switch v {
-		case "--key":
-			key = args[i+1]
-		case "--secret":
-			secret = args[i+1]
-		case "--domain":
-			domain = args[i+1]
-		case "-c":
-			configFile = args[i+1]
+	if jsonPath == "" {
+		if config.CloudXNS_API_Key == "" || config.CloudXNS_API_Secret == "" || config.DDNS_Domain == "" {
+			fmt.Println("miss required params! please check help note:")
+			flag.PrintDefaults()
+			os.Exit(-1)
 		}
 	}
 
-	if configFile == "" {
-		if key == "" || secret == "" || domain == "" {
-			fmt.Println("miss required params! please check help note:\n", helpNote)
-			return
+	if jsonPath != "" {
+		if err := config.Read(jsonPath); err != nil {
+			fmt.Println("error read config file, please check.\n", err)
+			os.Exit(-1)
 		}
 	}
 
 	api := CloudXNSAPI{
-		Config: HomeDDNSConfig{
-			CloudXNS_API_Key:    key,
-			CloudXNS_API_Secret: secret,
-			DDNS_Domain:         domain,
-		},
-	}
-
-	if configFile != "" {
-		if err := api.Config.Read(configFile); err != nil {
-			fmt.Println("error read config file, please check.\n", err)
-			os.Exit(-1)
-		}
+		Config: config,
 	}
 
 	ip, err := getOwnIP()
@@ -162,11 +170,13 @@ or
 				if err = api.updateDomainAAA(v, ip); err != nil {
 					fmt.Println("error : ", err)
 				} else {
-					fmt.Println("Successfull!")
+					fmt.Println("updated!")
 				}
 			} else {
 				fmt.Println("same IP value in record, don't need set again.")
 			}
+
+			ipDiff(api.Config, ip)
 
 			break
 		}
@@ -177,7 +187,8 @@ or
 		if err = api.addDomainAAA(*domainData, hostName, ip); err != nil {
 			fmt.Println("error : ", err)
 		} else {
-			fmt.Println("Successfull!")
+			ipDiff(api.Config, ip)
+			fmt.Println("added!")
 		}
 	}
 }

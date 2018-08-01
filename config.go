@@ -11,6 +11,8 @@ type HomeDDNSConfig struct {
 	CloudXNS_API_Key    string
 	CloudXNS_API_Secret string
 	DDNS_Domain         string
+	IP_Path             string
+	IP_Diff_Shell       string
 }
 
 func (config *HomeDDNSConfig) Read(filepath string) error {
